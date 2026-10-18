@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>蛋糕派送助手</title>
+<style>
+:root{
+  --bg:#f3f4f6; --card:#ffffff; --field:#ffffff; --ink:#1d2127; --mute:#5f6b7a; --line:#dde1e7;
+  --accent:#a3294f; --on-accent:#ffffff; --ok:#15803d; --warn:#9a5b06; --warn-bg:#fff7e6; --warn-line:#e9b44c; --err:#b42318;
+  --font:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#13161b; --card:#1b1f26; --field:#14171c; --ink:#e7eaee; --mute:#9aa5b4; --line:#2e343d;
+  --accent:#e8789f; --on-accent:#1c0a12; --ok:#4ade80; --warn:#f0b955; --warn-bg:#2a2112; --warn-line:#6b5120; --err:#f87171; color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 var(--font);
+  padding:20px max(16px,env(safe-area-inset-right,0px)) 56px max(16px,env(safe-area-inset-left,0px))}
+main{max-width:860px;margin:0 auto}
+h1{font-size:23px;margin:0 0 4px}
+h2{font-size:16px;margin:0 0 10px}
+.sub{color:var(--mute);margin:0 0 14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+label{display:block;font-size:12px;color:var(--mute);min-width:0}
+input,textarea,select{width:100%;margin-top:3px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;color:var(--ink);background:var(--field)}
+input:focus-visible,textarea:focus-visible,select:focus-visible,button:focus-visible,a.btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+textarea{resize:vertical}
+button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:8px 14px}
+button.primary,a.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:600}
+a.btn{display:inline-block;text-decoration:none;border-radius:8px;padding:8px 14px;border:1px solid var(--accent)}
+button:disabled{opacity:.5;cursor:wait}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+.status{color:var(--mute);font-size:13px}
+.status.err{color:var(--err)}
+.hint{font-size:12px;color:var(--mute);margin-top:6px}
+.hint.warn{color:var(--warn)}
+.order{border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:10px}
+.order .grid{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.order .wide{grid-column:1/-1}
+.stop{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px;background:var(--card)}
+.stop.bad{border-color:var(--warn-line);background:var(--warn-bg)}
+.stop>b{background:var(--accent);color:var(--on-accent);border-radius:50%;min-width:26px;height:26px;display:grid;place-items:center;font-size:13px;font-variant-numeric:tabular-nums}
+.stop .info{flex:1;min-width:0}
+.eta{color:var(--ok);font-size:13px;margin-left:6px;font-variant-numeric:tabular-nums}
+.mute{color:var(--mute);font-size:13px;word-break:break-word}
+.warn{color:var(--warn);font-size:13px}
+.btns{display:flex;gap:4px}
+.btns button{padding:4px 9px}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+  <h1>蛋糕派送助手</h1>
+  <p class="sub">粘贴客户消息，提取订单，规划路线，一键发给配送员</p>
+
+  <section class="card">
+    <h2>① 基本设置（自动记在这台设备上）</h2>
+    <div class="grid">
+      <label>Gemini 密钥<input id="apikey" type="password" autocomplete="off" placeholder="在 aistudio.google.com/apikey 申请"></label>
+      <label>工作室位置（Google Maps 完整链接，或地址）<input id="origin" placeholder="粘贴工作室的 Google Maps 链接"></label>
+      <label>配送员 WhatsApp 号码<input id="driver" placeholder="050 123 4567 或 +971…" inputmode="tel"></label>
+      <label>派送日期<input id="date" type="date"></label>
+      <label>出发时间<input id="depart" type="time" value="09:00"></label>
+      <label>每单停留（分钟）<input id="dwell" type="number" min="0" value="5"></label>
+      <label>清单语言<select id="lang"><option value="zh">中文</option><option value="en">English</option></select></label>
+      <label>Gemini 模型<input id="model" value="gemini-2.5-flash"></label>
+    </div>
+    <div id="originHint" class="hint warn" hidden></div>
+    <div class="hint">密钥只保存在这台设备的浏览器里，不会上传到别处。解析订单时，消息内容会直接发给 Google Gemini。</div>
+  </section>
+
+  <section class="card">
+    <h2>② 粘贴客户消息（微信 / WhatsApp，多位客户可一起贴）</h2>
+    <textarea id="raw" rows="9" placeholder="直接粘贴，格式乱也没关系…"></textarea>
+    <div class="bar">
+      <button id="parseBtn" class="primary">解析订单</button>
+      <span id="parseStatus" class="status"></span>
+    </div>
+  </section>
+
+  <section class="card" id="planBox" hidden>
+    <h2>③ 核对订单（可直接修改）</h2>
+    <div id="orders"></div>
+    <div class="bar">
+      <label style="display:flex;gap:6px;align-items:center;font-size:14px;color:var(--ink)">
+        <input type="checkbox" id="timePri" checked style="width:auto;margin:0"> 按送达时间优先（同一时间段内再优化路线）
+      </label>
+    </div>
+    <div class="bar">
+      <button id="planBtn" class="primary">规划路线</button>
+      <button id="addBtn">＋ 手动加一单</button>
+      <span id="planStatus" class="status"></span>
+    </div>
+  </section>
+
+  <section class="card" id="result" hidden>
+    <h2>④ 派送顺序</h2>
+    <p class="status" style="margin-top:0">可用 ↑ ↓ 手动调整；调整后预计到达时间不会重新计算。</p>
+    <div id="stops"></div>
+    <h2 style="margin-top:16px">⑤ 发给配送员</h2>
+    <textarea id="msg" rows="14"></textarea>
+    <div class="bar">
+      <a id="wa" class="btn primary" target="_blank" rel="noopener">通过 WhatsApp 发送</a>
+      <button id="copyBtn">复制文本</button>
+      <span id="copyStatus" class="status"></span>
+    </div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const pad = n => String(n).padStart(2, '0');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
+const store = {
+  get(k){ try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v){ try { localStorage.setItem(k, v); } catch {} }
+};
+
+const FIELDS = [['name','姓名'],['phone','电话'],['time_from','最早送达'],['time_to','最晚送达'],['address','地址'],['maps_url','Google 定位链接'],['notes','备注']];
+const L = {
+  zh:{title:'今日派送清单',count:'共{n}单',cust:'客户',addr:'地址',nav:'导航',note:'备注',eta:'预计到达',by:'须在 {t} 前送达',route:'整条路线（Google Maps）'},
+  en:{title:'Delivery list',count:'{n} orders',cust:'Customer',addr:'Address',nav:'Navigate',note:'Notes',eta:'ETA',by:'Deliver before {t}',route:'Full route (Google Maps)'}
+};
+const W_NAME = '链接里没有精确坐标，位置按地点名称估算，排序仅供参考（导航仍用客户原链接）';
+const W_SHORT = '这是短链接，网页版无法展开，位置按文字地址估算，排序仅供参考（导航仍用客户原链接）';
+const W_ADDR = '按文字地址估算的位置，可能不准，建议让客户发定位';
+const MAX_ORDERS = 60, MAX_TEXT = 20000;
+
+let orders = [], stops = [], origin = null;
+
+/* ================= 设置记忆 ================= */
+const KEYS = ['apikey','origin','driver','depart','dwell','lang','model'];
+KEYS.forEach(k => { const v = store.get('cr_' + k); if (v) $('#' + k).value = v; });
+$('#date').value = todayStr();
+KEYS.forEach(k => $('#' + k).addEventListener('change', () => { store.set('cr_' + k, $('#' + k).value); if (stops.length) buildMessage(); }));
+$('#date').addEventListener('change', () => stops.length && buildMessage());
+
+const isShort = u => /maps\.app\.goo\.gl|goo\.gl\/maps|g\.co\/kgs/i.test(u || '');
+function showOriginHint(){
+  const v = $('#origin').value.trim(), el = $('#originHint');
+  if (isShort(v)) { el.hidden = false; el.textContent = '这是短链接，网页版无法展开。请在浏览器打开它，复制地址栏里带 @纬度,经度 的完整网址，再粘贴到这里。只需做一次。'; }
+  else el.hidden = true;
+}
+$('#origin').addEventListener('input', showOriginHint); showOriginHint();
+
+function setStatus(el, text, err){ el.textContent = text; el.classList.toggle('err', !!err); }
+
+/* ================= 解析订单（Gemini） ================= */
+const PARSE_PROMPT = `你是迪拜一家蛋糕店的订单助手。下面是从 WhatsApp / 微信复制来的客户消息，
+可能中英文混杂，也可能包含多位客户。请提取每一单的派送信息，只输出 JSON 数组，
+每个元素包含以下字段（没有就填 null）：
+
+- name: 收件人姓名
+- phone: 联系电话（保留原样）
+- address: 文字地址（楼名/小区/Cluster/房间号/别墅号/附近地标，尽量完整）
+- maps_url: 消息中出现的 Google Maps 链接（maps.app.goo.gl、goo.gl/maps、google.com/maps 等），原样保留
+- time_from: 最早可送达时间，24 小时制 "HH:MM"
+- time_to: 必须送达的截止时间，24 小时制 "HH:MM"。"14:00 前" -> time_to=14:00；"下午 2-4 点" -> time_from=14:00, time_to=16:00
+- notes: 其他备注（送前电话、保温袋、门禁、写字内容、生日蛋糕等）
+
+规则：
+1. 不要编造信息；消息里没有的字段填 null。
+2. 同一客户的多条消息要合并成一单。
+3. 不是订单的闲聊内容忽略。`;
+
+async function callGemini(text){
+  const key = $('#apikey').value.trim();
+  if (!key) throw new Error('请先在上方「基本设置」填写 Gemini 密钥');
+  const model = ($('#model').value || 'gemini-2.5-flash').trim();
+  let r;
+  try {
+    r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'x-goog-api-key': key},
+      body: JSON.stringify({
+        contents: [{parts: [{text: PARSE_PROMPT + '\n\n客户消息：\n' + text}]}],
+        generationConfig: {responseMimeType: 'application/json', temperature: 0}
+      })
+    });
+  } catch { throw new Error('连不上 Gemini，请检查网络'); }
+  if (!r.ok) {
+    let m = ''; try { m = (await r.json()).error.message; } catch {}
+    if (r.status === 429) throw new Error('Gemini 免费额度暂时用完，请稍后再试');
+    if (r.status === 400 && /api key/i.test(m)) throw new Error('Gemini 密钥无效，请检查');
+    if (r.status === 403) throw new Error('Gemini 拒绝了请求，请检查密钥是否可用');
+    throw new Error(`Gemini 返回 ${r.status}：${m}`);
+  }
+  const j = await r.json();
+  const raw = j.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!raw) throw new Error('Gemini 没有返回内容，请重试');
+  let data = JSON.parse(raw.replace(/^\s*```(?:json)?/i, '').replace(/```\s*$/, ''));
+  if (!Array.isArray(data)) data = data.orders || [data];
+  return data;
+}
+
+function normPhone(p){
+  let d = String(p || '').replace(/[^\d+]/g, '');
+  if (!d) return '';
+  if (d.startsWith('+')) d = d.slice(1);
+  else if (d.startsWith('00')) d = d.slice(2);
+  else if (d.startsWith('0')) d = '971' + d.slice(1);
+  else if (d.length === 9 && d.startsWith('5')) d = '971' + d;
+  if (d.startsWith('971') && d.length === 12) return `+971 ${d.slice(3,5)} ${d.slice(5,8)} ${d.slice(8)}`;
+  return '+' + d;
+}
+function cleanOrder(o){
+  const out = {};
+  FIELDS.forEach(([k]) => { const v = o?.[k]; out[k] = (v == null || v === 'null') ? '' : String(v).trim(); });
+  if (!out.maps_url) {
+    const m = /https?:\/\/\S+/.exec(out.address);
+    if (m) { out.maps_url = m[0].replace(/[).,]+$/, ''); out.address = out.address.replace(/https?:\/\/\S+/g, '').replace(/^[ ,;]+|[ ,;]+$/g, ''); }
+  }
+  out.phone = normPhone(out.phone);
+  return out;
+}
+
+$('#parseBtn').onclick = async () => {
+  const btn = $('#parseBtn'), st = $('#parseStatus'), text = $('#raw').value.trim();
+  if (!text) return setStatus(st, '请先粘贴客户消息', true);
+  if (text.length > MAX_TEXT) return setStatus(st, `一次粘贴的内容太长（上限 ${MAX_TEXT} 字），请分几次解析`, true);
+  btn.disabled = true; setStatus(st, '解析中…');
+  try {
+    orders = (await callGemini(text)).map(cleanOrder); stops = [];
+    renderOrders(); renderStops();
+    setStatus(st, orders.length ? `识别到 ${orders.length} 单，请核对` : '没有识别到订单，请检查粘贴的内容', !orders.length);
+  } catch (e) { setStatus(st, e.message, true); }
+  btn.disabled = false;
+};
+
+function renderOrders(){
+  $('#orders').innerHTML = orders.map((o, i) => `
+    <div class="order"><div class="grid">
+      ${FIELDS.map(([k, l]) => `<label class="${['address','maps_url','notes'].includes(k) ? 'wide' : ''}">${l}<input data-i="${i}" data-k="${k}" value="${esc(o[k])}"></label>`).join('')}
+    </div>
+    ${isShort(o.maps_url) ? `<div class="hint warn">短链接，网页版无法展开，位置会按文字地址估算。想要准确排序：<a href="${esc(o.maps_url)}" target="_blank" rel="noopener">打开链接</a>，复制地址栏里的完整网址，粘贴回上面的定位链接栏。</div>` : ''}
+    <div class="bar"><button data-del="${i}">删除这一单</button></div></div>`).join('');
+  $('#planBox').hidden = !orders.length;
+}
+$('#orders').addEventListener('input', e => { const t = e.target; if (t.dataset.k) orders[t.dataset.i][t.dataset.k] = t.value; });
+$('#orders').addEventListener('change', e => { if (e.target.dataset.k === 'maps_url') { const y = window.scrollY; renderOrders(); window.scrollTo(0, y); } });
+$('#orders').addEventListener('click', e => { const i = e.target.dataset.del; if (i !== undefined) { orders.splice(+i, 1); renderOrders(); } });
+$('#addBtn').onclick = () => { orders.push(Object.fromEntries(FIELDS.map(([k]) => [k, '']))); renderOrders(); };
+
+/* ================= 定位 ================= */
+const safeDecode = s => { try { return decodeURIComponent(s || ''); } catch { return s || ''; } };
+const COORD_RES = [
+  /@(-?\d+\.\d+),(-?\d+\.\d+)/,
+  /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/,
+  /[?&](?:q|query|ll|destination|daddr|center)=(-?\d+\.\d+),\s*(-?\d+\.\d+)/
+];
+function coordsFrom(s){
+  s = safeDecode(s);
+  for (const re of COORD_RES) { const m = re.exec(s); if (m) return [+m[1], +m[2]]; }
+  return null;
+}
+function placeText(url){
+  const u = safeDecode(url).replace(/\+/g, ' ');
+  let m = /[?&](?:q|query)=([^&#]+)/.exec(u);
+  if (m) return m[1].trim();
+  m = /\/maps\/(?:place|search)\/([^/@?]+)/.exec(u);
+  return m ? m[1].trim() : '';
+}
+
+let lastNom = 0; const nomCache = new Map();
+async function nominatim(q){
+  if (nomCache.has(q)) return nomCache.get(q);
+  const wait = lastNom + 1100 - Date.now(); if (wait > 0) await sleep(wait);   // 公共服务：每秒最多 1 次
+  lastNom = Date.now();
+  try {
+    const r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ae&q=' + encodeURIComponent(q), {headers: {Accept: 'application/json'}});
+    if (!r.ok) return null;
+    const d = await r.json();
+    const v = d.length ? [+d[0].lat, +d[0].lon] : null;
+    nomCache.set(q, v); return v;
+  } catch { return null; }
+}
+async function geocodeText(text){
+  const parts = text.split(/\s+-\s+|,/).map(s => s.trim()).filter(Boolean);
+  const tries = [text];
+  if (parts.length > 1) tries.push(parts.slice(1).join(', '));
+  if (parts.length > 3) tries.push(parts.slice(-3).join(', '));
+  for (const q of [...new Set(tries)]) { const c = await nominatim(q); if (c) return c; }
+  return null;
+}
+/* 返回 {c:[lat,lng], w:提醒} 或 null */
+async function locate(url, address){
+  url = (url || '').trim(); address = (address || '').trim();
+  const m = /^(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)$/.exec(url);
+  if (m) return {c: [+m[1], +m[2]], w: ''};
+  if (/^https?:\/\//i.test(url)) {
+    const c = coordsFrom(url); if (c) return {c, w: ''};
+    if (!isShort(url)) { const t = placeText(url); if (t) { const g = await geocodeText(t); if (g) return {c: g, w: W_NAME}; } }
+    if (address) { const g = await geocodeText(address); if (g) return {c: g, w: isShort(url) ? W_SHORT : W_ADDR}; }
+    return null;
+  }
+  const txt = url || address;
+  if (txt) { const g = await geocodeText(txt); if (g) return {c: g, w: W_ADDR}; }
+  return null;
+}
+
+/* ================= 路线 ================= */
+const hav = (a, b) => {  // 直线距离估算行车秒数（30km/h，绕路系数 1.4）
+  const rad = x => x * Math.PI / 180, dp = rad(b[0] - a[0]), dl = rad(b[1] - a[1]);
+  const h = Math.sin(dp/2)**2 + Math.cos(rad(a[0])) * Math.cos(rad(b[0])) * Math.sin(dl/2)**2;
+  return 2 * 6371 * Math.asin(Math.sqrt(h)) * 1.4 / 30 * 3600;
+};
+async function distMatrix(pts){
+  const cost = pts.map((a, i) => pts.map((b, j) => i === j ? 0 : hav(a, b)));
+  try {
+    const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 15000);
+    const r = await fetch('https://router.project-osrm.org/table/v1/driving/' + pts.map(p => p[1] + ',' + p[0]).join(';') + '?annotations=duration', {signal: ctl.signal});
+    clearTimeout(t);
+    if (!r.ok) return {cost, osrm: false};
+    const d = await r.json();
+    if (d.code !== 'Ok') return {cost, osrm: false};
+    for (let i = 0; i < pts.length; i++) for (let j = 0; j < pts.length; j++) { const v = d.durations[i][j]; if (i !== j && v != null) cost[i][j] = +v; }
+    return {cost, osrm: true};
+  } catch { return {cost, osrm: false}; }
+}
+const perms = a => a.length <= 1 ? [a] : a.flatMap((x, i) => perms([...a.slice(0, i), ...a.slice(i + 1)]).map(p => [x, ...p]));
+function solvePath(start, nodes, cost){      // 从 start 出发、不用回起点的最短路径
+  if (!nodes.length) return [];
+  const total = s => cost[start][s[0]] + s.slice(1).reduce((t, n, i) => t + cost[s[i]][n], 0);
+  if (nodes.length <= 8) { let best = null, bv = Infinity; for (const p of perms(nodes)) { const v = total(p); if (v < bv) { bv = v; best = p; } } return best; }
+  let order = [], left = new Set(nodes), cur = start;
+  while (left.size) { let nx = null, nv = Infinity; for (const j of left) if (cost[cur][j] < nv) { nv = cost[cur][j]; nx = j; } order.push(nx); left.delete(nx); cur = nx; }
+  let improved = true;
+  while (improved) {
+    improved = false;
+    for (let i = 0; i < order.length - 1; i++) for (let j = i + 1; j < order.length; j++) {
+      const nw = [...order.slice(0, i), ...order.slice(i, j + 1).reverse(), ...order.slice(j + 1)];
+      if (total(nw) < total(order) - 1e-9) { order = nw; improved = true; }
+    }
+  }
+  return order;
+}
+const parseHM = s => { const m = /^\s*(\d{1,2}):(\d{2})\s*$/.exec(s || ''); return m ? +m[1] * 60 + +m[2] : null; };
+const fmtHM = t => { t = Math.round(t); return pad(Math.floor(t / 60) % 24) + ':' + pad(t % 60); };
+const slotOf = o => { let t = parseHM(o.time_to); if (t === null) t = parseHM(o.time_from); return t === null ? 99 : Math.floor(t / 120); };
+const navOf = o => o.maps_url ? o.maps_url
+  : (o.lat != null ? `https://www.google.com/maps/search/?api=1&query=${o.lat},${o.lng}`
+  : (o.address ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(o.address) : ''));
+
+$('#planBtn').onclick = async () => {
+  const btn = $('#planBtn'), st = $('#planStatus');
+  btn.disabled = true;
+  try {
+    const originTxt = $('#origin').value.trim();
+    if (!originTxt || !orders.length) throw new Error('请填写工作室位置，并至少有一单');
+    if (orders.length > MAX_ORDERS) throw new Error(`一次最多规划 ${MAX_ORDERS} 单`);
+    setStatus(st, '定位工作室…');
+    const o = await locate(originTxt, '');
+    if (!o) throw new Error(isShort(originTxt)
+      ? '工作室是短链接，网页版无法展开。请在浏览器打开它，复制地址栏里带 @纬度,经度 的完整网址再粘贴。'
+      : '无法识别工作室位置，请粘贴 Google Maps 完整链接、"纬度,经度"，或更完整的地址');
+    origin = {lat: o.c[0], lng: o.c[1]};
+
+    const located = [], missing = [];
+    for (let i = 0; i < orders.length; i++) {
+      setStatus(st, `定位客户 ${i + 1}/${orders.length}…`);
+      const od = {};
+      FIELDS.forEach(([k]) => od[k] = orders[i][k] || '');
+      od.phone = normPhone(od.phone);
+      const loc = await locate(od.maps_url, od.address);
+      if (loc) { od.lat = loc.c[0]; od.lng = loc.c[1]; od.warning = loc.w; located.push(od); }
+      else { od.lat = od.lng = null; od.eta = ''; od.warning = '无法定位，请让客户发 Google 定位或补充地址'; od.nav_link = navOf(od); missing.push(od); }
+    }
+
+    let ordered = [], osrm = true;
+    if (located.length) {
+      setStatus(st, '计算路线…');
+      const pts = [[origin.lat, origin.lng], ...located.map(s => [s.lat, s.lng])];
+      const dm = await distMatrix(pts); const cost = dm.cost; osrm = dm.osrm;
+      const groups = {};
+      located.forEach((s, i) => (groups[$('#timePri').checked ? slotOf(s) : 0] ||= []).push(i + 1));
+      const seq = []; let cur = 0;
+      for (const k of Object.keys(groups).map(Number).sort((a, b) => a - b)) {
+        const part = solvePath(cur, groups[k], cost); seq.push(...part); cur = part[part.length - 1];
+      }
+      let t = parseHM($('#depart').value) ?? 540, prev = 0; const dwell = +$('#dwell').value || 0;
+      for (const idx of seq) {
+        const s = located[idx - 1]; t += cost[prev][idx] / 60;
+        const tf = parseHM(s.time_from), tt = parseHM(s.time_to);
+        if (tf !== null && t < tf) t = tf;
+        s.eta = fmtHM(t);
+        if (tt !== null && t > tt) s.warning = [s.warning, `预计 ${s.eta} 到，晚于截止时间 ${s.time_to}`].filter(Boolean).join('；');
+        s.nav_link = navOf(s); t += dwell; prev = idx; ordered.push(s);
+      }
+    }
+    stops = [...ordered, ...missing]; renderStops();
+    const bad = stops.filter(s => s.warning).length;
+    setStatus(st, (bad ? `完成，${bad} 单有提醒，请查看` : '完成') + (osrm ? '' : '（路线服务暂不可用，时间按直线距离估算）'));
+  } catch (e) { setStatus(st, e.message, true); }
+  btn.disabled = false;
+};
+
+function renderStops(){
+  $('#stops').innerHTML = stops.map((s, i) => `
+    <div class="stop ${s.lat == null || s.warning ? 'bad' : ''}"><b>${i + 1}</b>
+      <div class="info">
+        <div><strong>${esc(s.name || '-')}</strong> ${esc(s.phone || '')}${s.eta ? `<span class="eta">ETA ${s.eta}</span>` : ''}${s.time_to ? ` <span class="mute">截止 ${esc(s.time_to)}</span>` : ''}</div>
+        <div class="mute">${esc(s.address || s.maps_url || '')}</div>
+        ${s.warning ? `<div class="warn">⚠️ ${esc(s.warning)}</div>` : ''}
+      </div>
+      <div class="btns"><button data-up="${i}">↑</button><button data-down="${i}">↓</button><button data-rm="${i}">✕</button></div>
+    </div>`).join('');
+  $('#result').hidden = !stops.length;
+  if (stops.length) buildMessage();
+}
+$('#stops').addEventListener('click', e => {
+  const d = e.target.dataset; let i;
+  if (d.up !== undefined && +d.up > 0) { i = +d.up; [stops[i-1], stops[i]] = [stops[i], stops[i-1]]; }
+  else if (d.down !== undefined && +d.down < stops.length - 1) { i = +d.down; [stops[i+1], stops[i]] = [stops[i], stops[i+1]]; }
+  else if (d.rm !== undefined) stops.splice(+d.rm, 1);
+  else return;
+  renderStops();
+});
+
+/* ================= WhatsApp 文本 ================= */
+function routeLinks(){
+  const pts = stops.filter(s => s.lat != null);
+  if (!origin || !pts.length) return [];
+  const links = []; let from = origin;
+  for (let i = 0; i < pts.length; i += 10) {   // 每条链接最多 9 个途经点 + 终点
+    const chunk = pts.slice(i, i + 10), dest = chunk[chunk.length - 1];
+    const wp = chunk.slice(0, -1).map(p => `${p.lat},${p.lng}`).join('|');
+    let u = `https://www.google.com/maps/dir/?api=1&travelmode=driving&origin=${from.lat},${from.lng}&destination=${dest.lat},${dest.lng}`;
+    if (wp) u += `&waypoints=${encodeURIComponent(wp)}`;
+    links.push(u); from = dest;
+  }
+  return links;
+}
+function buildMessage(){
+  const lang = $('#lang').value, t = L[lang];
+  const d = new Date(($('#date').value || todayStr()) + 'T00:00');
+  const ds = d.toLocaleDateString(lang === 'zh' ? 'zh-CN' : 'en-GB', {month: 'long', day: 'numeric'});
+  let m = `🚗 ${t.title}（${ds}）${t.count.replace('{n}', stops.length)}\n`;
+  stops.forEach((s, i) => {
+    m += `\n${i + 1}. ${t.cust}：${s.name || '-'}${s.phone ? ` (${s.phone})` : ''}\n`;
+    if (s.address) m += `   📍 ${t.addr}：${s.address}\n`;
+    if (s.nav_link) m += `   🗺 ${t.nav}：${s.nav_link}\n`;
+    const tm = [];
+    if (s.eta) tm.push(`${t.eta} ${s.eta}`);
+    if (s.time_to) tm.push(t.by.replace('{t}', s.time_to));
+    if (tm.length) m += `   🕐 ${tm.join(' | ')}\n`;
+    if (s.notes) m += `   📝 ${t.note}：${s.notes}\n`;
+  });
+  const links = routeLinks();
+  if (links.length) m += `\n🧭 ${t.route}：\n` + links.map((u, i) => links.length > 1 ? `(${i + 1}) ${u}` : u).join('\n');
+  $('#msg').value = m.trim();
+  updateWa();
+}
+function driverDigits(){
+  let d = $('#driver').value.replace(/[^\d+]/g, '');
+  if (d.startsWith('+')) return d.slice(1);
+  if (d.startsWith('00')) return d.slice(2);
+  if (d.startsWith('0')) return '971' + d.slice(1);
+  return d;
+}
+function updateWa(){ $('#wa').href = `https://wa.me/${driverDigits()}?text=${encodeURIComponent($('#msg').value)}`; }
+$('#msg').addEventListener('input', updateWa);
+$('#driver').addEventListener('input', updateWa);
+$('#copyBtn').onclick = async () => {
+  try { await navigator.clipboard.writeText($('#msg').value); setStatus($('#copyStatus'), '已复制'); }
+  catch { $('#msg').select(); setStatus($('#copyStatus'), '已选中文字，请长按或按 Ctrl/Cmd+C 复制'); }
+};
+</script>
+</body>
+</html>
